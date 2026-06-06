@@ -3,7 +3,7 @@ set -e
 
 # ZTTP Multi-Platform Installer Script
 
-SERVER_URL="http://localhost" # Will be updated during deployment
+SERVER_URL="http://127.0.0.1:8555" # Will be updated during deployment
 DEFAULT_PORT=2224
 
 echo "=== ZTTP CLI Installer ==="
@@ -30,7 +30,7 @@ check_port() {
 download_binary() {
     local target_os=$1
     local binary_name="zttp-${target_os}-${ARCH}"
-    local download_url="${SERVER_URL}/dist/release/${binary_name}"
+    local download_url="${SERVER_URL}/release/${binary_name}"
     
     echo "Downloading ${binary_name}..."
     if ! curl -fSL "$download_url" -o /tmp/zttp; then

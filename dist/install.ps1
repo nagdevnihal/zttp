@@ -1,11 +1,11 @@
 # install.ps1
 # ZTTP Multi-Platform Installer Script for Windows
 
-$ServerUrl = "http://localhost" # Will be updated during deployment
+$ServerUrl = "http://127.0.0.1:8555" # Will be updated during deployment
 $Arch = "amd64" # Currently we only compile for windows-amd64
 $BinaryName = "zttp-windows-$Arch.exe"
-$DownloadUrl = "$ServerUrl/dist/release/$BinaryName"
-$ChecksumUrl = "$ServerUrl/dist/release/SHA256SUMS.txt"
+$DownloadUrl = "$ServerUrl/release/$BinaryName"
+$ChecksumUrl = "$ServerUrl/release/SHA256SUMS.txt"
 
 $InstallDir = "C:\Program Files\ZTTP"
 $ExePath = "$InstallDir\zttp.exe"
