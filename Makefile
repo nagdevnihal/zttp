@@ -37,9 +37,9 @@ release:
 	@if [ -f .env ]; then \
 		IP=$$(grep '^PROXY_NODE_IP=' .env | cut -d '=' -f2 | tr -d '\r'); \
 		if [ -n "$$IP" ]; then \
-			echo "Updating installers with SERVER_URL=http://$$IP"; \
-			sed -i "s|SERVER_URL=\".*\"|SERVER_URL=\"http://$$IP\"|g" dist/install.sh; \
-			sed -i "s|\$$ServerUrl = \".*\"|\$$ServerUrl = \"http://$$IP\"|g" dist/install.ps1; \
+			echo "Updating installers with SERVER_URL=http://$$IP:8001"; \
+			sed -i "s|SERVER_URL=\".*\"|SERVER_URL=\"http://$$IP:8001\"|g" dist/install.sh; \
+			sed -i "s|\$$ServerUrl = \".*\"|\$$ServerUrl = \"http://$$IP:8001\"|g" dist/install.ps1; \
 		fi; \
 	else \
 		echo "Warning: .env not found, install scripts not updated."; \

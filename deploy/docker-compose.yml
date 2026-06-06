@@ -118,7 +118,7 @@ services:
     container_name: zttp-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8001:80"
     volumes:
       - ./dist:/usr/share/nginx/html:ro
     networks:
