@@ -20,7 +20,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Auto-run migrations on first container start
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+      - ../db/migrations:/docker-entrypoint-initdb.d:ro
+      - ../db/seed.sql:/docker-entrypoint-initdb.d/999_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U zttp -d zttp"]
       interval: 5s
@@ -97,11 +98,12 @@ services:
       AUDIT_LOG_DIR:     ${AUDIT_LOG_DIR:-/var/log/zttp/audit}
       SOC_WEBHOOK_URL:   ${SOC_WEBHOOK_URL:-}
     ports:
-      - "2222:2222"   # SSH proxy port (developers connect here)
+      - "2224:2224"   # SSH proxy port (developers connect here)
       - "8080:8080"   # Health check port (NLB probes /healthz)
       - "9090:9090"   # gRPC Kill Switch port
     volumes:
       - audit_logs:/var/log/zttp/audit
+      - ./certs:/etc/zttp/tls:ro
     networks:
       - zttp-internal
     healthcheck:
