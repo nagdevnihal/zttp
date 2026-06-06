@@ -21,7 +21,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
       # Auto-run migrations on first container start
       - ../db/migrations:/docker-entrypoint-initdb.d:ro
-      - ../db/seed.sql:/docker-entrypoint-initdb.d/999_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U zttp -d zttp"]
       interval: 5s
