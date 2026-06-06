@@ -61,6 +61,7 @@ if [ "$OS" = "Darwin" ]; then
     download_binary "darwin"
     
     echo "Installing to /usr/local/bin/zttp..."
+    sudo mkdir -p /usr/local/bin
     sudo mv /tmp/zttp /usr/local/bin/zttp
     
     # Strip quarantine flag to bypass Gatekeeper warning
@@ -162,6 +163,7 @@ EOF
 
     elif [ "$CHOICE" = "3" ]; then
         echo "Installing as plain executable..."
+        sudo mkdir -p /usr/local/bin
         sudo mv /tmp/zttp /usr/local/bin/zttp
         echo "✓ Installed. Type 'zttp' to connect."
     else
