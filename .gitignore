@@ -1,0 +1,34 @@
+.env
+*.pem
+*.key
+id_rsa
+id_ed25519
+*.p12
+*.pfx
+
+# Build artifacts
+dist/release/
+bin/
+zttp_cli
+zttp_proxy
+
+# Protobuf tools
+protoc_bin/
+*.zip
+
+# Go test cache
+*.test
+*.out
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor artifacts
+.vscode/settings.json
+*.swp
+*.swo
+
+# Docker volumes (managed by docker compose)
+postgres_data/
+audit_logs/
