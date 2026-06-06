@@ -1,0 +1,46 @@
+# deploy/Dockerfile.proxy
+# Multi-stage build for the ZTTP proxy server binary.
+# Final image is minimal (scratch or distroless) — no shell, no package manager.
+
+# ── Stage 1: Build ──────────────────────────────────────────────────────────
+FROM golang:1.22-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /build
+
+# Copy go.mod and go.sum first for layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy all source code
+COPY . .
+
+# Build the proxy binary — static, no CGO, stripped of debug info
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -X main.Version=$(git describe --tags --always 2>/dev/null || echo dev) \
+              -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+              -X main.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+    -o /build/zttp-proxy \
+    ./cmd/proxy/
+
+# ── Stage 2: Runtime ────────────────────────────────────────────────────────
+# Use distroless/static for minimal attack surface — no shell at all
+FROM gcr.io/distroless/static-debian12:nonroot
+
+# Copy CA certificates for TLS (Vault + outbound HTTPS)
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Copy the compiled binary
+COPY --from=builder /build/zttp-proxy /zttp-proxy
+
+# Create audit log directory (will be mounted as volume in production)
+# Note: distroless doesn't have mkdir — the volume mount handles this
+
+EXPOSE 2222 8080 9090
+
+USER nonroot:nonroot
+
+ENTRYPOINT ["/zttp-proxy"]
