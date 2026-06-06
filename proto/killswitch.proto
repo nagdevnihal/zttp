@@ -1,0 +1,38 @@
+// proto/killswitch.proto
+syntax = "proto3";
+
+package killswitch;
+option go_package = "github.com/nagdevnihal/zttp/internal/killswitch/proto";
+
+service KillSwitchService {
+    // TerminateSession forcefully closes the named session's TCP sockets.
+    rpc TerminateSession(TerminateRequest) returns (TerminateResponse);
+
+    // ListActiveSessions returns all sessions on this proxy node (for dashboard polling).
+    rpc ListActiveSessions(ListRequest) returns (ListResponse);
+}
+
+message TerminateRequest {
+    string session_id = 1;  // UUID string
+    string reason     = 2;  // "admin-kill" | "offboarding" | etc.
+}
+
+message TerminateResponse {
+    bool   success       = 1;
+    string error_message = 2;  // empty on success
+    int64  elapsed_ms    = 3;  // ms from receipt to socket close
+}
+
+message ListRequest {}
+
+message ListResponse {
+    repeated SessionInfo sessions = 1;
+}
+
+message SessionInfo {
+    string session_id    = 1;
+    string user_id       = 2;
+    string server_id     = 3;
+    string proxy_node_ip = 4;
+    int64  start_time    = 5;  // Unix timestamp
+}
