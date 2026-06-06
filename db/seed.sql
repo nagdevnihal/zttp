@@ -8,7 +8,8 @@ INSERT INTO users (username, password_hash, role) VALUES
     ('jdoe',    '$2a$12$1.3El2Y7Qw7TZSIyeXit.ee7TpzMeUgVyBR4OA5kOuGjt6TPy1ui.', 'sre-tier1'),
     ('alice',   '$2a$12$1.3El2Y7Qw7TZSIyeXit.ee7TpzMeUgVyBR4OA5kOuGjt6TPy1ui.', 'backend-dev'),
     ('bob',     '$2a$12$1.3El2Y7Qw7TZSIyeXit.ee7TpzMeUgVyBR4OA5kOuGjt6TPy1ui.', 'backend-dev'),
-    ('auditor', '$2a$12$1.3El2Y7Qw7TZSIyeXit.ee7TpzMeUgVyBR4OA5kOuGjt6TPy1ui.', 'auditor')
+    ('auditor', '$2a$12$1.3El2Y7Qw7TZSIyeXit.ee7TpzMeUgVyBR4OA5kOuGjt6TPy1ui.', 'auditor'),
+    ('admin',   '$2a$12$fN7BkRyNmDdHB7PAO5pA1O6BFAIM2UI.BBZ9GXJsRvlrsWTrt6G92', 'superadmin')
 ON CONFLICT (username) DO NOTHING;
 
 -- Servers (vault paths match what vault-seed.sh populates)
@@ -24,6 +25,7 @@ ON CONFLICT (hostname) DO NOTHING;
 -- RBAC Policies
 INSERT INTO policies (role, allowed_environments, allowed_commands) VALUES
     ('sre-tier1',   ARRAY['dev','staging','production'], NULL),
+    ('superadmin',  ARRAY['dev','staging','production'], NULL),
     ('backend-dev', ARRAY['dev','staging'],              NULL),
     ('auditor',     ARRAY['dev'],                        ARRAY['ls','cat','grep','tail','head','wc','journalctl','systemctl status'])
 ON CONFLICT (role) DO NOTHING;
