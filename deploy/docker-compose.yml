@@ -120,7 +120,7 @@ services:
     ports:
       - "8555:80"
     volumes:
-      - ./dist:/usr/share/nginx/html:ro
+      - ../dist:/usr/share/nginx/html:ro
     networks:
       - zttp-internal
 
