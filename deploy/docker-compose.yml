@@ -1,0 +1,138 @@
+# ZTTP Local Development Stack
+# Brings up: PostgreSQL, HashiCorp Vault (dev mode), and the ZTTP proxy skeleton.
+#
+# Usage:
+#   docker compose up -d          # start all services
+#   docker compose logs -f proxy  # follow proxy logs
+#   docker compose down -v        # stop and remove volumes
+
+services:
+
+  # ── PostgreSQL (Control Plane DB) ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: zttp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-zttp}
+      POSTGRES_USER:     ${POSTGRES_USER:-zttp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zttpsecret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-run migrations on first container start
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zttp -d zttp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - zttp-internal
+
+  # ── HashiCorp Vault (Secret Store) ────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.17
+    container_name: zttp-vault
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK       # Required by Vault to prevent memory from swapping to disk
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID:    "dev-root-token-zttp"
+      VAULT_DEV_LISTEN_ADDRESS:   "0.0.0.0:8200"
+      VAULT_LOG_LEVEL:            "info"
+    ports:
+      - "8201:8200"
+    command: vault server -dev
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://localhost:8200"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - zttp-internal
+
+  # ── Vault Seeder (one-shot) ───────────────────────────────────────────────
+  # Seeds test SSH keys and AppRole into Vault after it's healthy.
+  vault-seed:
+    image: hashicorp/vault:1.17
+    container_name: zttp-vault-seed
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR:  "http://vault:8200"
+      VAULT_TOKEN: "dev-root-token-zttp"
+    volumes:
+      - ./vault-seed.sh:/vault-seed.sh:ro
+    command: sh -c "apk add --no-cache openssh-client && sh /vault-seed.sh"
+    networks:
+      - zttp-internal
+    restart: "no"   # run once only
+
+  # ── ZTTP Proxy (Phase 1 Skeleton) ─────────────────────────────────────────
+  proxy:
+    build:
+      context: ..               # project root — where go.mod and cmd/ live
+      dockerfile: deploy/Dockerfile.proxy
+    container_name: zttp-proxy
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL:      ${DATABASE_URL:-postgres://zttp:zttpsecret@postgres:5432/zttp?sslmode=disable}
+      VAULT_ADDR:        ${VAULT_ADDR:-http://vault:8200}
+      VAULT_TOKEN:       ${VAULT_TOKEN:-dev-root-token-zttp}
+      VAULT_DEV_MODE:    ${VAULT_DEV_MODE:-true}
+      PROXY_NODE_IP:     ${PROXY_NODE_IP:-172.20.0.10}
+      PROXY_LISTEN_ADDR: ${PROXY_LISTEN_ADDR:-0.0.0.0:2222}
+      HTTP_LISTEN_ADDR:  ${HTTP_LISTEN_ADDR:-0.0.0.0:8080}
+      GRPC_LISTEN_ADDR:  ${GRPC_LISTEN_ADDR:-0.0.0.0:9090}
+      AUDIT_LOG_DIR:     ${AUDIT_LOG_DIR:-/var/log/zttp/audit}
+      SOC_WEBHOOK_URL:   ${SOC_WEBHOOK_URL:-}
+    ports:
+      - "2222:2222"   # SSH proxy port (developers connect here)
+      - "8080:8080"   # Health check port (NLB probes /healthz)
+      - "9090:9090"   # gRPC Kill Switch port
+    volumes:
+      - audit_logs:/var/log/zttp/audit
+    networks:
+      - zttp-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Nginx (Static File Server) ────────────────────────────────────────────
+  # Serves the CLI binaries and install scripts from the dist/ folder
+  nginx:
+    image: nginx:alpine
+    container_name: zttp-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+    networks:
+      - zttp-internal
+
+volumes:
+  postgres_data:
+    name: zttp-postgres-data
+  audit_logs:
+    name: zttp-audit-logs
+
+networks:
+  zttp-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
