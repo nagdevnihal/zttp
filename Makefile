@@ -34,6 +34,16 @@ release:
 	GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 $(GO) build -buildvcs=false $(LDFLAGS) -o dist/release/zttp-darwin-arm64  ./cmd/zttp/
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -buildvcs=false $(LDFLAGS) -o dist/release/zttp-windows-amd64.exe ./cmd/zttp/
 	cd dist/release && sha256sum * > SHA256SUMS.txt
+	@if [ -f .env ]; then \
+		IP=$$(grep '^PROXY_NODE_IP=' .env | cut -d '=' -f2 | tr -d '\r'); \
+		if [ -n "$$IP" ]; then \
+			echo "Updating installers with SERVER_URL=http://$$IP"; \
+			sed -i "s|SERVER_URL=\".*\"|SERVER_URL=\"http://$$IP\"|g" dist/install.sh; \
+			sed -i "s|\$$ServerUrl = \".*\"|\$$ServerUrl = \"http://$$IP\"|g" dist/install.ps1; \
+		fi; \
+	else \
+		echo "Warning: .env not found, install scripts not updated."; \
+	fi
 	@echo "✓ All binaries built in dist/release/"
 
 ## Run the release build inside a Docker container (bypasses snap/wsl issues)
