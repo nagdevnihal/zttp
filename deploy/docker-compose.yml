@@ -133,6 +133,3 @@ volumes:
 networks:
   zttp-internal:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/24
