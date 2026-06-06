@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS servers (
     hostname          VARCHAR(100) UNIQUE NOT NULL,
     private_ip        INET         NOT NULL,
     vault_secret_path VARCHAR(255) NOT NULL,
+    ssh_user          VARCHAR(50)  NOT NULL DEFAULT 'root',
     environment       VARCHAR(50)  NOT NULL
 );
 
