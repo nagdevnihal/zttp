@@ -81,12 +81,12 @@ if [ "$OS" = "Linux" ]; then
     echo "  2) Docker Container  (requires Docker installed)"
     echo "  3) Plain Executable  (just copy to /usr/local/bin)"
     echo ""
-    read -p "Enter choice [1/2/3]: " CHOICE
+    read -p "Enter choice [1/2/3]: " CHOICE < /dev/tty
 
     if [ "$CHOICE" = "1" ] || [ "$CHOICE" = "2" ]; then
         if ! check_port $DEFAULT_PORT; then
             echo "⚠ Port $DEFAULT_PORT is already in use."
-            read -p "Enter an alternative local port to bind: " USER_PORT
+            read -p "Enter an alternative local port to bind: " USER_PORT < /dev/tty
             if ! check_port "$USER_PORT"; then
                 echo "✗ Port $USER_PORT is also in use. Cannot proceed."
                 exit 1
