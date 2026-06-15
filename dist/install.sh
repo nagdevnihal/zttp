@@ -84,7 +84,7 @@ if [ "$OS" = "Linux" ]; then
     echo ""
     read -p "Enter choice [1/2/3]: " CHOICE < /dev/tty
 
-    if [ "$CHOICE" = "1" ] || [ "$CHOICE" = "2" ]; then
+    if [ "$CHOICE" = "1" ]; then
         if ! check_port $DEFAULT_PORT; then
             echo "⚠ Port $DEFAULT_PORT is already in use."
             read -p "Enter an alternative local port to bind: " USER_PORT < /dev/tty
@@ -144,6 +144,7 @@ services:
   zttp-client:
     build: .
     container_name: zttp-client
+    network_mode: "host"
     restart: unless-stopped
     stdin_open: true
     tty: true
