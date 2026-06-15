@@ -100,13 +100,14 @@ func (e *PolicyEngine) Authorize(ctx context.Context, userID uuid.UUID, role, ta
 			p.allowed_commands,
 			(p.role IS NOT NULL)                        AS policy_found,
 			COALESCE(
-				s.environment = ANY(p.allowed_environments) OR
-				EXISTS (SELECT 1 FROM user_server_grants g WHERE g.user_id = $3 AND g.server_id = s.id),
+				EXISTS (SELECT 1 FROM user_server_grants g WHERE g.user_id = $3 AND g.server_id = s.id) OR
+				(u.override_role_access = false AND s.environment = ANY(p.allowed_environments)),
 				false
 			)                                           AS is_authorized
 		FROM servers s
+		CROSS JOIN users u
 		LEFT JOIN policies p ON p.role = $1
-		WHERE s.hostname = $2
+		WHERE s.hostname = $2 AND u.id = $3
 	`, role, targetHostname, userID).Scan(
 		&serverID, &hostname, &privateIPStr, &environment,
 		&sshUser, &vaultPath, &allowedCmds, &policyFound, &isAuthorized,
