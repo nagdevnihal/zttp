@@ -127,13 +127,13 @@ func Bridge(ctx context.Context, cfg *BridgeConfig) error {
 		// 1. Rate limiter on raw client read
 		limitedReader := newRateLimitedReader(cfg.ClientConn, streamRateLimit, streamBurst)
 
-		// 2. Fork to audit log
-		teeReader := io.TeeReader(limitedReader, cfg.AuditWriter)
-
+		// 2. Do not log stdin to prevent duplicated keystrokes and plain-text password logging
+		// Audit log only records stdout (what the user actually sees)
+		
 		// 3. Filter for multiplexers / whitelist before writing to backend
 		filterWriter := newCommandFilterWriter(backendStdin, cfg.ClientConn, cfg.AllowedCmds)
 
-		_, err := io.CopyBuffer(filterWriter, teeReader, make([]byte, streamBufSize))
+		_, err := io.CopyBuffer(filterWriter, limitedReader, make([]byte, streamBufSize))
 		errCh <- err
 	}()
 
