@@ -111,5 +111,5 @@ docker-ps:
 ## ── Cleanup ─────────────────────────────────────────────────────────────────
 
 clean:
-	rm -rf dist/
+	rm -rf dist/release/ dist/zttp*
 	$(GO) clean -cache
