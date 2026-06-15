@@ -133,3 +133,69 @@ func (s *Store) ListAllActive(ctx context.Context) ([]SessionRecord, error) {
 	}
 	return sessions, rows.Err()
 }
+
+// ServerSummary is a lightweight server record for the audit log viewer.
+type ServerSummary struct {
+	ID          uuid.UUID
+	Hostname    string
+	Environment string
+}
+
+// ListServersWithSessions returns all servers that have at least one recorded
+// session, ordered alphabetically by hostname.
+func (s *Store) ListServersWithSessions(ctx context.Context) ([]ServerSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT DISTINCT srv.id, srv.hostname, srv.environment
+        FROM   servers srv
+        JOIN   active_sessions a ON a.server_id = srv.id
+        ORDER  BY srv.hostname
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var servers []ServerSummary
+	for rows.Next() {
+		var r ServerSummary
+		if err := rows.Scan(&r.ID, &r.Hostname, &r.Environment); err != nil {
+			return nil, err
+		}
+		servers = append(servers, r)
+	}
+	return servers, rows.Err()
+}
+
+// ListSessionsByServer returns the 50 most-recent sessions for a given server,
+// newest first, with the associated username joined in.
+func (s *Store) ListSessionsByServer(ctx context.Context, serverID uuid.UUID) ([]SessionRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT a.session_id, a.user_id, a.server_id,
+               a.proxy_node_ip::text, a.start_time, a.status,
+               u.username, srv.hostname
+        FROM   active_sessions a
+        JOIN   users u   ON u.id   = a.user_id
+        JOIN   servers srv ON srv.id = a.server_id
+        WHERE  a.server_id = $1
+        ORDER  BY a.start_time DESC
+        LIMIT  50
+    `, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sessions []SessionRecord
+	for rows.Next() {
+		var r SessionRecord
+		var ipStr string
+		if err := rows.Scan(
+			&r.SessionID, &r.UserID, &r.ServerID,
+			&ipStr, &r.StartTime, &r.Status,
+			&r.Username, &r.Hostname,
+		); err != nil {
+			return nil, err
+		}
+		r.ProxyNodeIP = net.ParseIP(ipStr)
+		sessions = append(sessions, r)
+	}
+	return sessions, rows.Err()
+}
