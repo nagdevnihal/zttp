@@ -120,12 +120,7 @@ services:
       - ./certs:/etc/zttp/tls:ro
     networks:
       - zttp-internal
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+
 
   # ── Nginx (Static File Server) ────────────────────────────────────────────
   # Serves the CLI binaries and install scripts from the dist/ folder
