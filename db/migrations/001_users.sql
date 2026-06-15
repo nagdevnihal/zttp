@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     role            VARCHAR(50)  NOT NULL,
     failed_attempts INT          NOT NULL DEFAULT 0,
     locked_until    TIMESTAMP    NULL,
+    override_role_access BOOLEAN NOT NULL DEFAULT false,
     created_at      TIMESTAMP    NOT NULL DEFAULT NOW()
 );
 
