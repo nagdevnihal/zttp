@@ -32,6 +32,7 @@ func (s *Server) handleGatewayMenu(ctx context.Context, conn net.Conn, userID uu
 		}
 
 		if key == "CTRL_C" || key == "ESC" {
+			s.clearScreen(conn)
 			return "", fmt.Errorf("user aborted")
 		}
 
@@ -46,8 +47,10 @@ func (s *Server) handleGatewayMenu(ctx context.Context, conn net.Conn, userID uu
 			}
 		case "ENTER":
 			if index == len(opts) {
+				s.clearScreen(conn)
 				return "", fmt.Errorf("user exited gateway")
 			}
+			s.clearScreen(conn)
 			return opts[index].hostname, nil
 		}
 	}
@@ -66,12 +69,14 @@ func (s *Server) queryAccessibleServers(userID uuid.UUID, role string) ([]gatewa
 	query := `
 		SELECT s.hostname, s.environment
 		FROM servers s
-		LEFT JOIN policies p ON p.role = $1
-		LEFT JOIN user_server_grants g ON g.server_id = s.id AND g.user_id = $2
-		WHERE s.environment = ANY(p.allowed_environments) OR g.user_id IS NOT NULL
+		CROSS JOIN users u
+		LEFT JOIN policies p ON p.role = u.role
+		LEFT JOIN user_server_grants g ON g.server_id = s.id AND g.user_id = $1
+		WHERE u.id = $1
+		  AND (g.user_id IS NOT NULL OR (u.override_role_access = false AND s.environment = ANY(p.allowed_environments)))
 		ORDER BY s.hostname
 	`
-	rows, err := s.DB.Query(query, role, userID)
+	rows, err := s.DB.Query(query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +106,10 @@ func (s *Server) drawGatewayMenu(conn net.Conn, opts []gatewayServerOption, inde
 			out.WriteString(fmt.Sprintf("%s> %-15s (%s)%s\r\n", ColorGreen, opt.hostname, opt.environment, ColorReset))
 		} else {
 			out.WriteString(fmt.Sprintf("  %-15s (%s)\r\n", opt.hostname, opt.environment))
+		}
+		
+		if opt.hostname == "zttp-admin" {
+			out.WriteString("  ────────────────────────────────────────\r\n")
 		}
 	}
 
