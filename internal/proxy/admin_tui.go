@@ -5,14 +5,20 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nagdevnihal/zttp/internal/audit"
+	"github.com/nagdevnihal/zttp/internal/session"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
@@ -33,6 +39,10 @@ const (
 	StateAddServerMethod
 	StateAddServerAuto
 	StateAddServerPaste
+	StateViewAuditServers
+	StateViewAuditSessions
+	StateViewAuditChoice
+	StateViewAdminLog
 )
 
 const (
@@ -80,13 +90,29 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 	sForm := &addServerForm{}
 	autoForm := &addServerAutoForm{}
 	pasteBuffer := ""
-	
+
 	var createdUserMsg string
 	var createdUserID string
 	var isEditMode bool
-	
+
 	var roles []string
 	var serverOpts []serverOption
+
+	// Audit log viewer state
+	var auditServers []session.ServerSummary
+	var auditSessions []session.SessionRecord
+	var selectedAuditServer session.ServerSummary
+	var selectedAuditSession session.SessionRecord
+
+	// Admin action logger
+	adminLog, _ := audit.NewAdminLogger(s.AuditLogDir, adminUsername)
+	if adminLog != nil {
+		adminLog.Log("[LOGIN]", fmt.Sprintf("admin '%s' opened admin console", adminUsername))
+		defer func() {
+			adminLog.Log("[LOGOUT]", fmt.Sprintf("admin '%s' exited admin console", adminUsername))
+			adminLog.Close()
+		}()
+	}
 
 	for {
 		s.clearScreen(conn)
@@ -116,6 +142,14 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 			s.drawViewUsers(conn)
 		case StateViewServers:
 			s.drawViewServers(conn)
+		case StateViewAuditServers:
+			s.drawAuditServers(conn, auditServers, menuIndex)
+		case StateViewAuditSessions:
+			s.drawAuditSessions(conn, selectedAuditServer.Hostname, auditSessions, menuIndex)
+		case StateViewAuditChoice:
+			s.drawAuditChoice(conn, selectedAuditSession.Username, selectedAuditServer.Hostname, selectedAuditSession.StartTime, menuIndex)
+		case StateViewAdminLog:
+			s.drawAuditServers(conn, auditServers, menuIndex) // redraws server list while admin log is loading
 		}
 
 		key, err := s.readKey(conn)
@@ -123,6 +157,7 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 			return
 		}
 		if key == "CTRL_C" {
+			s.clearScreen(conn)
 			return
 		}
 
@@ -133,8 +168,8 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 				if menuIndex > 0 {
 					menuIndex--
 				}
-			case "DOWN":
-				if menuIndex < 5 {
+				case "DOWN":
+				if menuIndex < 6 {
 					menuIndex++
 				}
 			case "ENTER":
@@ -154,6 +189,14 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 				case 4:
 					state = StateViewServers
 				case 5:
+					var err error
+					auditServers, err = s.SessionStore.ListServersWithSessions(ctx)
+					if err != nil {
+						auditServers = nil
+					}
+					state = StateViewAuditServers
+				case 6: // Back
+					s.clearScreen(conn)
 					return // Back to gateway menu
 				}
 				menuIndex = 0
@@ -193,7 +236,7 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 					sForm.sshUser = sForm.sshUser[:len(sForm.sshUser)-1]
 				}
 			default:
-				if len(key) == 1 && key != " " && key != "\t" {
+				if len(key) == 1 && key[0] >= 33 && key[0] <= 126 {
 					if sForm.focus == 0 {
 						sForm.hostname += key
 					} else if sForm.focus == 1 {
@@ -284,7 +327,7 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 					autoForm.password = autoForm.password[:len(autoForm.password)-1]
 				}
 			default:
-				if len(key) == 1 && key != " " && key != "\t" {
+				if len(key) == 1 && key[0] >= 33 && key[0] <= 126 {
 					if autoForm.focus == 0 {
 						autoForm.username += key
 					} else if autoForm.focus == 1 {
@@ -316,7 +359,7 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 					pasteBuffer = pasteBuffer[:len(pasteBuffer)-1]
 				}
 			default:
-				if len(key) == 1 {
+				if len(key) == 1 && (key[0] >= 32 && key[0] <= 126 || key[0] == '\t') {
 					pasteBuffer += key
 				}
 			}
@@ -354,7 +397,7 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 					uForm.confirm = uForm.confirm[:len(uForm.confirm)-1]
 				}
 			default:
-				if len(key) == 1 && key != " " && key != "\t" {
+				if len(key) == 1 && key[0] >= 33 && key[0] <= 126 {
 					if uForm.focus == 0 {
 						uForm.username += key
 					} else if uForm.focus == 1 {
@@ -384,6 +427,9 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 				} else {
 					createdUserMsg = fmt.Sprintf("User '%s' created successfully!", uForm.username)
 					createdUserID = id
+					if adminLog != nil {
+						adminLog.Log("[USER_ADD]", fmt.Sprintf("admin created user '%s' (role: %s)", uForm.username, uForm.role))
+					}
 					serverOpts = s.queryServers()
 					state = StateAssignAccess
 				}
@@ -414,6 +460,9 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 							msg += fmt.Sprintf("\r\n\r\nRevoked access to: %s\r\nActive sessions for these servers were instantly killed.", strings.Join(revoked, ", "))
 						}
 						createdUserMsg = msg
+						if adminLog != nil {
+							adminLog.Log("[ACCESS_ASSIGN]", fmt.Sprintf("admin updated server access for user '%s'", uForm.username))
+						}
 					}
 					state = StateSummary
 					menuIndex = 0
@@ -471,22 +520,30 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 					uForm.role = parts[2]
 					
 					// Populate serverOpts
+					// Populate serverOpts
 					serverOpts = nil
-					sRows, err := s.DB.Query("SELECT id, hostname, environment FROM servers ORDER BY hostname")
+					query := `
+						SELECT s.id, s.hostname, s.environment, 
+							   (g.user_id IS NOT NULL OR (u.override_role_access = false AND s.environment = ANY(p.allowed_environments))) AS selected
+						FROM servers s
+						LEFT JOIN user_server_grants g ON g.server_id = s.id AND g.user_id = $1
+						CROSS JOIN users u
+						LEFT JOIN policies p ON p.role = u.role
+						WHERE u.id = $1
+						ORDER BY s.hostname
+					`
+					sRows, err := s.DB.Query(query, createdUserID)
 					if err == nil {
 						for sRows.Next() {
 							var sID, hostname, env string
-							sRows.Scan(&sID, &hostname, &env)
-							
-							// Check if currently assigned
-							var exists bool
-							s.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM user_server_grants WHERE user_id = $1 AND server_id = $2)", createdUserID, sID).Scan(&exists)
+							var selected bool
+							sRows.Scan(&sID, &hostname, &env, &selected)
 							
 							serverOpts = append(serverOpts, serverOption{
 								id:          sID,
 								hostname:    hostname,
 								environment: env,
-								selected:    exists,
+								selected:    selected,
 							})
 						}
 						sRows.Close()
@@ -494,6 +551,93 @@ func (s *Server) handleAdminConsole(ctx context.Context, conn net.Conn, adminUse
 					
 					isEditMode = true
 					state = StateAssignAccess
+					menuIndex = 0
+				}
+			}
+
+		case StateViewAuditServers:
+			maxIdx := len(auditServers) + 1 // index 0 = admin log, 1..N = servers, N+1 = back
+			switch key {
+			case "UP":
+				if menuIndex > 0 {
+					menuIndex--
+				}
+			case "DOWN":
+				if menuIndex < maxIdx {
+					menuIndex++
+				}
+			case "ENTER":
+				if menuIndex == maxIdx { // Back
+					state = StateMainMenu
+					menuIndex = 0
+				} else if menuIndex == 0 { // Admin Actions Log
+					if adminLog != nil {
+						adminLog.Log("[LOG_VIEW_TXT]", "admin viewed admin-actions.log")
+					}
+					s.streamAdminLog(conn)
+					// After viewer exits (Ctrl+C), stay on server list
+				} else { // A real server (index 1..N maps to auditServers[index-1])
+					selectedAuditServer = auditServers[menuIndex-1]
+					var err error
+					auditSessions, err = s.SessionStore.ListSessionsByServer(ctx, selectedAuditServer.ID)
+					if err != nil {
+						auditSessions = nil
+					}
+					state = StateViewAuditSessions
+					menuIndex = 0
+				}
+			}
+
+		case StateViewAuditSessions:
+			maxIdx := len(auditSessions)
+			switch key {
+			case "UP":
+				if menuIndex > 0 {
+					menuIndex--
+				}
+			case "DOWN":
+				if menuIndex < maxIdx {
+					menuIndex++
+				}
+			case "ENTER":
+				if menuIndex == maxIdx { // Back
+					state = StateViewAuditServers
+					menuIndex = 0
+				} else if menuIndex < len(auditSessions) {
+					selectedAuditSession = auditSessions[menuIndex]
+					state = StateViewAuditChoice
+					menuIndex = 0
+				}
+			}
+
+		case StateViewAuditChoice:
+			switch key {
+			case "UP":
+				if menuIndex > 0 {
+					menuIndex--
+				}
+			case "DOWN":
+				if menuIndex < 2 {
+					menuIndex++
+				}
+			case "ENTER":
+				switch menuIndex {
+				case 0: // View text log
+					if adminLog != nil {
+						adminLog.Log("[LOG_VIEW_TXT]", fmt.Sprintf("admin viewed text log of session %s (%s → %s)", selectedAuditSession.SessionID, selectedAuditSession.Username, selectedAuditServer.Hostname))
+					}
+					s.streamTextLog(conn, selectedAuditSession.SessionID, selectedAuditSession.Username, selectedAuditServer.Hostname, selectedAuditSession.StartTime)
+					state = StateViewAuditSessions
+					menuIndex = 0
+				case 1: // Play recording
+					if adminLog != nil {
+						adminLog.Log("[LOG_VIEW_REC]", fmt.Sprintf("admin played recording of session %s (%s → %s)", selectedAuditSession.SessionID, selectedAuditSession.Username, selectedAuditServer.Hostname))
+					}
+					s.playTTYRec(conn, selectedAuditSession.SessionID, selectedAuditSession.Username, selectedAuditServer.Hostname, selectedAuditSession.StartTime)
+					state = StateViewAuditSessions
+					menuIndex = 0
+				case 2: // Back
+					state = StateViewAuditSessions
 					menuIndex = 0
 				}
 			}
@@ -506,7 +650,7 @@ func (s *Server) clearScreen(conn net.Conn) {
 }
 
 func (s *Server) drawMainMenu(conn net.Conn, adminUsername string, index int) {
-	opts := []string{"Add User", "Add Server", "Manage Server Access", "View Users", "View Servers", "Back to Servers"}
+	opts := []string{"Add User", "Add Server", "Manage Server Access", "View Users", "View Servers", "View Audit Logs", "[ Back ]"}
 	var out strings.Builder
 	out.WriteString(fmt.Sprintf("%s=== ZTTP Admin Console ===%s\r\n", ColorCyan, ColorReset))
 	out.WriteString(fmt.Sprintf("Logged in as: %s\r\n\r\n", adminUsername))
@@ -877,6 +1021,9 @@ func (s *Server) createUser(username, password, role string) (string, error) {
 }
 
 func (s *Server) assignServers(userID string, servers []serverOption) ([]string, error) {
+	// Set override_role_access to true so granular permissions are absolute
+	s.DB.Exec("UPDATE users SET override_role_access = true WHERE id = $1", userID)
+
 	var revoked []string
 	for _, srv := range servers {
 		if srv.selected {
@@ -1008,9 +1155,15 @@ func (s *Server) autoProvisionKey(ip, sshUser, sshPass, pubKey string) error {
 
 func (s *Server) readKey(conn net.Conn) (string, error) {
 	buf := make([]byte, 1)
-	_, err := conn.Read(buf)
-	if err != nil {
-		return "", err
+	for {
+		_, err := conn.Read(buf)
+		if err != nil {
+			if isTimeout(err) {
+				continue
+			}
+			return "", err
+		}
+		break
 	}
 	
 	if buf[0] == 0x1b {
@@ -1043,4 +1196,273 @@ func (s *Server) readKey(conn net.Conn) (string, error) {
 	}
 	
 	return string(buf), nil
+}
+
+// ── Audit Log Viewer: Draw Functions ─────────────────────────────────────────
+
+func (s *Server) drawAuditServers(conn net.Conn, servers []session.ServerSummary, index int) {
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("%s=== ZTTP · Audit Logs ===%s\r\n\r\n", ColorCyan, ColorReset))
+	out.WriteString("  Select a log to inspect:\r\n\r\n")
+
+	// Index 0 is always the admin actions log
+	if index == 0 {
+		out.WriteString(fmt.Sprintf("%s> ★ ADMIN ACTIONS LOG%s\r\n", ColorGreen, ColorReset))
+	} else {
+		out.WriteString("  ★ ADMIN ACTIONS LOG\r\n")
+	}
+
+	for i, srv := range servers {
+		label := fmt.Sprintf("%-20s (%s)", srv.Hostname, srv.Environment)
+		if index == i+1 {
+			out.WriteString(fmt.Sprintf("%s> %s%s\r\n", ColorGreen, label, ColorReset))
+		} else {
+			out.WriteString(fmt.Sprintf("  %s\r\n", label))
+		}
+	}
+
+	out.WriteString("\r\n")
+	backLabel := "[ Back ]"
+	if index == len(servers)+1 {
+		out.WriteString(fmt.Sprintf("%s> %s%s\r\n", ColorGreen, backLabel, ColorReset))
+	} else {
+		out.WriteString(fmt.Sprintf("  %s\r\n", backLabel))
+	}
+	conn.Write([]byte(out.String()))
+}
+
+func (s *Server) drawAuditSessions(conn net.Conn, hostname string, sessions []session.SessionRecord, index int) {
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("%s=== Audit Logs · %s ===%s\r\n\r\n", ColorCyan, hostname, ColorReset))
+	out.WriteString("  Recent sessions (last 50):\r\n\r\n")
+
+	if len(sessions) == 0 {
+		out.WriteString("  (no sessions recorded yet)\r\n")
+	}
+	for i, sess := range sessions {
+		ts := sess.StartTime.UTC().Format("2006-01-02 15:04") + " UTC"
+		label := fmt.Sprintf("%-12s  %s  [%s]", sess.Username, ts, sess.Status)
+		if index == i {
+			out.WriteString(fmt.Sprintf("%s> %s%s\r\n", ColorGreen, label, ColorReset))
+		} else {
+			out.WriteString(fmt.Sprintf("  %s\r\n", label))
+		}
+	}
+
+	out.WriteString("\r\n")
+	backLabel := "[ Back ]"
+	if index == len(sessions) {
+		out.WriteString(fmt.Sprintf("%s> %s%s\r\n", ColorGreen, backLabel, ColorReset))
+	} else {
+		out.WriteString(fmt.Sprintf("  %s\r\n", backLabel))
+	}
+	conn.Write([]byte(out.String()))
+}
+
+func (s *Server) drawAuditChoice(conn net.Conn, username, serverName string, startTime time.Time, index int) {
+	var out strings.Builder
+	ts := startTime.UTC().Format("2006-01-02 15:04") + " UTC"
+	out.WriteString(fmt.Sprintf("%s=== Session · %s → %s ===%s\r\n", ColorCyan, username, serverName, ColorReset))
+	out.WriteString(fmt.Sprintf("  Started: %s\r\n\r\n", ts))
+	
+	opts := []string{"View Text Log", "Play Recording", "Back"}
+	for i, opt := range opts {
+		if i == index {
+			out.WriteString(fmt.Sprintf("%s  > [ %-16s ]%s\r\n", ColorGreen, opt, ColorReset))
+		} else {
+			out.WriteString(fmt.Sprintf("    [ %-16s ]\r\n", opt))
+		}
+	}
+	conn.Write([]byte(out.String()))
+}
+
+// ── Audit Log Viewer: Viewer Functions ───────────────────────────────────────
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]|\x1b[()][AB012]|\x1b[=>]|\x1b\]0;[^\x07]*\x07`)
+
+// streamTextLog reads a .ttyrec file, strips binary frame headers and ANSI
+// codes, then writes the clean text to conn. Blocks until Ctrl+C or EOF.
+func (s *Server) streamTextLog(conn net.Conn, sessionID uuid.UUID, username, server string, startTime time.Time) {
+	path := filepath.Join(s.AuditLogDir, sessionID.String()+".ttyrec")
+	header := fmt.Sprintf("\r\n──── TEXT LOG · %s · %s · %s ────\r\nPress Ctrl+C to go back\r\n%s\r\n",
+		username, server, startTime.UTC().Format("2006-01-02 15:04")+" UTC",
+		strings.Repeat("─", 56))
+	conn.Write([]byte(header))
+
+	f, err := os.Open(path)
+	if err != nil {
+		conn.Write([]byte("\r\n[Recording not available for this session]\r\n"))
+		s.waitForCtrlC(conn)
+		return
+	}
+	defer f.Close()
+
+	// Read all frames and collect text
+	var text strings.Builder
+	hdr := make([]byte, 12)
+	for {
+		if _, err := io.ReadFull(f, hdr); err != nil {
+			break
+		}
+		length := binary.LittleEndian.Uint32(hdr[8:12])
+		data := make([]byte, length)
+		if _, err := io.ReadFull(f, data); err != nil {
+			break
+		}
+		text.Write(data)
+	}
+
+	// Strip ANSI and write clean text
+	clean := ansiEscape.ReplaceAllString(text.String(), "")
+	conn.Write([]byte(clean))
+	conn.Write([]byte("\r\n\r\n[END OF LOG — Press Ctrl+C to go back]\r\n"))
+	s.waitForCtrlC(conn)
+}
+
+// playTTYRec replays a .ttyrec file to conn with real-time frame delays.
+// Blocks until Ctrl+C or end of file.
+func (s *Server) playTTYRec(conn net.Conn, sessionID uuid.UUID, username, server string, startTime time.Time) {
+	path := filepath.Join(s.AuditLogDir, sessionID.String()+".ttyrec")
+	header := fmt.Sprintf("\r\n──── RECORDING · %s · %s · %s ────\r\nPress Ctrl+C to stop\r\n%s\r\n",
+		username, server, startTime.UTC().Format("2006-01-02 15:04")+" UTC",
+		strings.Repeat("─", 58))
+	conn.Write([]byte(header))
+
+	f, err := os.Open(path)
+	if err != nil {
+		conn.Write([]byte("\r\n[Recording not available for this session]\r\n"))
+		s.waitForCtrlC(conn)
+		return
+	}
+	defer f.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Ctrl+C detection channel
+	stopCh := make(chan struct{}, 1)
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_, err := conn.Read(buf)
+			conn.SetReadDeadline(time.Time{})
+			if err == nil && buf[0] == 3 {
+				select {
+				case stopCh <- struct{}{}:
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	const maxDelay = 2 * time.Second
+	hdr := make([]byte, 12)
+	var prevSec, prevUSec uint32
+	first := true
+
+	for {
+		select {
+		case <-stopCh:
+			s.flushConn(conn)
+			return
+		default:
+		}
+		if _, err := io.ReadFull(f, hdr); err != nil {
+			break
+		}
+		sec := binary.LittleEndian.Uint32(hdr[0:4])
+		usec := binary.LittleEndian.Uint32(hdr[4:8])
+		length := binary.LittleEndian.Uint32(hdr[8:12])
+
+		if !first {
+			deltaSec := int64(sec) - int64(prevSec)
+			deltaUSec := int64(usec) - int64(prevUSec)
+			delay := time.Duration(deltaSec)*time.Second + time.Duration(deltaUSec)*time.Microsecond
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+			if delay > 0 {
+				select {
+				case <-stopCh:
+					s.flushConn(conn)
+					return
+				case <-time.After(delay):
+				}
+			}
+		}
+		prevSec, prevUSec = sec, usec
+		first = false
+
+		data := make([]byte, length)
+		if _, err := io.ReadFull(f, data); err != nil {
+			break
+		}
+		conn.Write(data)
+	}
+	conn.Write([]byte("\r\n\r\n[END OF RECORDING — Press Ctrl+C to go back]\r\n"))
+	<-stopCh
+	s.flushConn(conn)
+}
+
+// streamAdminLog reads the admin-actions.log plain text file and writes it to conn.
+func (s *Server) streamAdminLog(conn net.Conn) {
+	path := filepath.Join(s.AuditLogDir, "admin-actions.log")
+	header := "\r\n──── ADMIN ACTIONS LOG ────\r\nPress Ctrl+C to go back\r\n──────────────────────────\r\n"
+	conn.Write([]byte(header))
+
+	f, err := os.Open(path)
+	if err != nil {
+		conn.Write([]byte("\r\n[No admin actions recorded yet]\r\n"))
+		s.waitForCtrlC(conn)
+		return
+	}
+	defer f.Close()
+	io.Copy(conn, f)
+	conn.Write([]byte("\r\n\r\n[END OF LOG — Press Ctrl+C to go back]\r\n"))
+	s.waitForCtrlC(conn)
+}
+
+// waitForCtrlC blocks reading from conn until the user sends Ctrl+C (byte 0x03).
+func (s *Server) waitForCtrlC(conn net.Conn) {
+	buf := make([]byte, 1)
+	for {
+		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		_, err := conn.Read(buf)
+		conn.SetReadDeadline(time.Time{})
+		if err == nil && buf[0] == 3 {
+			s.flushConn(conn)
+			return
+		}
+		if err != nil && !isTimeout(err) {
+			return
+		}
+	}
+}
+
+// flushConn clears any pending keystrokes (like extra Ctrl+C bytes held down)
+func (s *Server) flushConn(conn net.Conn) {
+	buf := make([]byte, 128)
+	conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	for {
+		if _, err := conn.Read(buf); err != nil {
+			break
+		}
+	}
+	conn.SetReadDeadline(time.Time{})
+}
+
+// isTimeout returns true if the error is a network timeout.
+func isTimeout(err error) bool {
+	type timeouter interface{ Timeout() bool }
+	if te, ok := err.(timeouter); ok {
+		return te.Timeout()
+	}
+	return false
 }
