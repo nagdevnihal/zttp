@@ -63,6 +63,7 @@ func drawLoginTUI() (string, string, error) {
 		}
 
 		if key == "CTRL_C" {
+			clearScreen()
 			return "exit", "", nil
 		}
 
@@ -82,6 +83,7 @@ func drawLoginTUI() (string, string, error) {
 				}
 				return form.username, form.password, nil
 			} else if form.focus == 3 {
+				clearScreen()
 				return "exit", "", nil
 			} else {
 				form.focus++
