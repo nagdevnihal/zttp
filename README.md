@@ -304,6 +304,25 @@ make run-proxy
 
 ---
 
+## Screenshots & Demo
+
+### 1. Installation
+![Installation](docs/screenshots/install.gif)
+
+### 2. Secure Login
+![Secure Login](docs/screenshots/login.gif)
+
+### 3. Add Server (Admin Console)
+![Add Server](docs/screenshots/add-server.gif)
+
+### 4. Connect to Server (Gateway)
+![Connect Server](docs/screenshots/connect-server.gif)
+
+### 5. Kill Switch (Admin Eject)
+![Kill Terminal](docs/screenshots/kill-terminal.gif)
+
+---
+
 ## Project Structure
 
 ```
