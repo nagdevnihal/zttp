@@ -307,19 +307,24 @@ make run-proxy
 ## Screenshots & Demo
 
 ### 1. Installation
-![Installation](docs/screenshots/install.gif)
+[![Installation Demo](docs/screenshots/install-paused.png)](docs/screenshots/install.gif)
+*(Click to play demo)*
 
 ### 2. Secure Login
-![Secure Login](docs/screenshots/login.gif)
+[![Secure Login Demo](docs/screenshots/login-paused.png)](docs/screenshots/login.gif)
+*(Click to play demo)*
 
 ### 3. Add Server (Admin Console)
-![Add Server](docs/screenshots/add-server.gif)
+[![Add Server Demo](docs/screenshots/add-server-paused.png)](docs/screenshots/add-server.gif)
+*(Click to play demo)*
 
 ### 4. Connect to Server (Gateway)
-![Connect Server](docs/screenshots/connect-server.gif)
+[![Connect Server Demo](docs/screenshots/connect-server-paused.png)](docs/screenshots/connect-server.gif)
+*(Click to play demo)*
 
 ### 5. Kill Switch (Admin Eject)
-![Kill Terminal](docs/screenshots/kill-terminal.gif)
+[![Kill Switch Demo](docs/screenshots/kill-terminal-paused.png)](docs/screenshots/kill-terminal.gif)
+*(Click to play demo)*
 
 ---
 
